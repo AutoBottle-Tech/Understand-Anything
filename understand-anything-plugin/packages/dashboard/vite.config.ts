@@ -10,6 +10,7 @@ import crypto from "crypto";
 // This token is printed to the terminal and must be in the URL
 // to fetch knowledge-graph.json or diff-overlay.json.
 const ACCESS_TOKEN = process.env.UNDERSTAND_ACCESS_TOKEN || crypto.randomBytes(16).toString("hex");
+const AUTO_TOKEN = process.env.UNDERSTAND_AUTO_TOKEN === "1";
 const MAX_SOURCE_FILE_BYTES = 1024 * 1024;
 
 function graphFileCandidates(fileName: string): string[] {
@@ -235,6 +236,20 @@ export default defineConfig({
     {
       name: "serve-knowledge-graph",
       configureServer(server) {
+        if (AUTO_TOKEN) {
+          server.middlewares.use((req, res, next) => {
+            const url = new URL(req.url ?? "/", "http://127.0.0.1");
+            const acceptsHtml = req.headers.accept?.includes("text/html") ?? false;
+            if (acceptsHtml && url.pathname === "/" && !url.searchParams.get("token")) {
+              url.searchParams.set("token", ACCESS_TOKEN);
+              res.writeHead(302, { Location: `/?${url.searchParams.toString()}` });
+              res.end();
+              return;
+            }
+            next();
+          });
+        }
+
         // Print the access URL once so the developer can open it.
         server.httpServer?.once("listening", () => {
           const address = server.httpServer?.address();

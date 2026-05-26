@@ -1,4 +1,5 @@
 packages:
   - 'understand-anything-plugin/packages/*'
   - 'understand-anything-plugin'
+  - 'understand-agent'
   - 'homepage'
