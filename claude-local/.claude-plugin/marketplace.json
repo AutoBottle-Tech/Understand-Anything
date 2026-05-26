@@ -1,0 +1,15 @@
+{
+  "name": "understand-anything",
+  "metadata": {
+    "description": "Local Understand-Anything marketplace for claude-local sessions"
+  },
+  "owner": {
+    "name": "Lum1104"
+  },
+  "plugins": [
+    {
+      "name": "understand-anything",
+      "source": "../understand-anything-plugin"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# claude-local runtime — keep secrets and Claude state out of git
+.env
+.claude_config/settings.local.json
+.claude_config/.claude.json
+.claude_config/plugins/
+.claude_config/sessions/
+.claude_config/session-env/
+.claude_config/projects/
+.claude_config/backups/
+.claude_config/.last-cleanup
+.understand-anything-plugin

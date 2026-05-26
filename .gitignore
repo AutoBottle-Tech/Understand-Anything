@@ -5,6 +5,11 @@ dist
 .DS_Store
 .env
 .env.*
+claude-local/.env
+claude-local/.claude_config/settings.local.json
+claude-local/.claude_config/.claude.json
+claude-local/.claude_config/plugins/
+claude-local/.understand-anything-plugin
 coverage/
 *.log
 __pycache__/
