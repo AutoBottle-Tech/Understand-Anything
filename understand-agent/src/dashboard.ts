@@ -141,6 +141,7 @@ export async function startDashboard(graphDir: string = REPO_ROOT): Promise<Dash
         GRAPH_DIR: resolvedGraphDir,
         UNDERSTAND_ACCESS_TOKEN: token,
         UNDERSTAND_AUTO_TOKEN: "1",
+        UNDERSTAND_DISABLE_TOKEN: process.env.UNDERSTAND_DISABLE_TOKEN ?? "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

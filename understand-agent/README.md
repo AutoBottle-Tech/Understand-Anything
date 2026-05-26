@@ -30,18 +30,41 @@ Or via pnpm:
 pnpm start:agent
 ```
 
+## Stop the server
+
+```bash
+./understand-agent/stop.sh
+```
+
+Or:
+
+```bash
+pnpm stop:agent
+```
+
+This kills whatever is listening on the agent port (`8787` by default) and dashboard port (`5173` by default). `start.sh` also frees those ports automatically before launching, so you usually only need `stop.sh` when you want to shut down without restarting.
+
+Custom ports:
+
+```bash
+UNDERSTAND_AGENT_PORT=8790 UNDERSTAND_DASHBOARD_PORT=5174 ./understand-agent/stop.sh
+```
+
 The server prints both URLs when it starts:
 
 ```
 understand-agent API:  http://127.0.0.1:8787
+Control UI:            http://127.0.0.1:8787/
 Understand Anything UI: http://127.0.0.1:5173/?token=...
 ```
 
-Open the **UI URL** in your browser to explore the knowledge graph. The token is included automatically — you do not need to paste it into the gate.
+Open the **Control UI** at `http://127.0.0.1:8787/` to pick projects, browse folders, save new projects, and run `/understand` without curl.
+
+Open the **Dashboard UI** in your browser to explore the knowledge graph after analysis completes.
 
 **Important:** the dashboard needs a completed analysis first. If you see `No knowledge graph found. Run /understand first.`, run `POST /understand` on the active project (see Projects below), then refresh the dashboard.
 
-Set a stable token in `claude-local/.env` with `UNDERSTAND_ACCESS_TOKEN` (default: `understand-local-dev-token`). Disable auto-open with `UNDERSTAND_DASHBOARD_OPEN=false`.
+Set a stable token in `claude-local/.env` with `UNDERSTAND_ACCESS_TOKEN` (default: `understand-local-dev-token`). When using `understand-agent`, the token is injected automatically and the paste gate is disabled (`UNDERSTAND_DISABLE_TOKEN=1`). Disable auto-open with `UNDERSTAND_DASHBOARD_OPEN=false`.
 
 ## Projects
 

@@ -11,6 +11,12 @@ import crypto from "crypto";
 // to fetch knowledge-graph.json or diff-overlay.json.
 const ACCESS_TOKEN = process.env.UNDERSTAND_ACCESS_TOKEN || crypto.randomBytes(16).toString("hex");
 const AUTO_TOKEN = process.env.UNDERSTAND_AUTO_TOKEN === "1";
+const DISABLE_TOKEN = process.env.UNDERSTAND_DISABLE_TOKEN === "1";
+/** When set, the SPA uses this token automatically (no paste gate). */
+const CLIENT_ACCESS_TOKEN =
+  DISABLE_TOKEN || AUTO_TOKEN || Boolean(process.env.UNDERSTAND_ACCESS_TOKEN)
+    ? ACCESS_TOKEN
+    : "";
 const MAX_SOURCE_FILE_BYTES = 1024 * 1024;
 
 function graphFileCandidates(fileName: string): string[] {
@@ -178,6 +184,10 @@ function readSourceFile(url: URL) {
 }
 
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_UNDERSTAND_ACCESS_TOKEN": JSON.stringify(CLIENT_ACCESS_TOKEN),
+  },
+
   test: {
     environment: "node",
     include: ["src/**/__tests__/**/*.test.ts"],
@@ -275,9 +285,8 @@ export default defineConfig({
             return;
           }
 
-          // FIX 3 — require the one-time token on all data endpoints.
-          // Requests without a matching ?token= get a 403.
-          if (url.searchParams.get("token") !== ACCESS_TOKEN) {
+          // FIX 3 — require token on data endpoints unless explicitly disabled (local agent).
+          if (!DISABLE_TOKEN && url.searchParams.get("token") !== ACCESS_TOKEN) {
             sendJson(res, 403, { error: "Forbidden: missing or invalid token" });
             return;
           }

@@ -69,11 +69,11 @@ function dataUrl(fileName: string, token: string | null): string {
  */
 function resolveInitialToken(): string | null {
   if (DEMO_MODE) return "__demo__";
+
   const params = new URLSearchParams(window.location.search);
   const urlToken = params.get("token");
   if (urlToken) {
     sessionStorage.setItem(SESSION_TOKEN_KEY, urlToken);
-    // Clean the URL
     params.delete("token");
     const cleanSearch = params.toString();
     const newUrl =
@@ -81,6 +81,13 @@ function resolveInitialToken(): string | null {
     window.history.replaceState(null, "", newUrl);
     return urlToken;
   }
+
+  const builtInToken = import.meta.env.VITE_UNDERSTAND_ACCESS_TOKEN?.trim();
+  if (builtInToken) {
+    sessionStorage.setItem(SESSION_TOKEN_KEY, builtInToken);
+    return builtInToken;
+  }
+
   return sessionStorage.getItem(SESSION_TOKEN_KEY);
 }
 

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/server.ts",
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "stop": "./stop.sh"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.128",

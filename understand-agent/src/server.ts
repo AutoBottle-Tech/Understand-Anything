@@ -1,5 +1,6 @@
 import http from "node:http";
 import path from "node:path";
+import { listBrowsePath } from "./browse.js";
 import { loadClaudeLocalEnv } from "./env.js";
 import { runAgent, type RunAgentRequest } from "./agent.js";
 import { getDashboardInfo, restartDashboard, startDashboard } from "./dashboard.js";
@@ -14,6 +15,7 @@ import {
   setActiveProject,
   type ProjectRecord,
 } from "./projects.js";
+import { serveStatic } from "./static.js";
 
 const env = loadClaudeLocalEnv();
 Object.assign(process.env, env);
@@ -108,6 +110,25 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/browse") {
+    try {
+      sendJson(res, 200, listBrowsePath(url.searchParams.get("path") ?? undefined));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      sendJson(res, 400, { ok: false, error: message });
+    }
+    return;
+  }
+
+  if (req.method === "GET" && serveStatic(url.pathname, res)) {
+    return;
+  }
+
+  if (req.method !== "POST") {
+    sendJson(res, 404, { ok: false, error: "Not found" });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/projects") {
     const body = await readJson(req);
     if (!body.path) {
@@ -123,11 +144,6 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       dashboardUrl: dashboardInfo?.url ?? null,
       message: statusMessage(project),
     });
-    return;
-  }
-
-  if (req.method !== "POST") {
-    sendJson(res, 404, { ok: false, error: "Not found" });
     return;
   }
 
@@ -224,6 +240,7 @@ async function main(): Promise<void> {
   server.listen(PORT, HOST, () => {
     console.log("");
     console.log(`understand-agent API:  http://${HOST}:${PORT}`);
+    console.log(`Control UI:            http://${HOST}:${PORT}/`);
     console.log(`Understand Anything UI: ${dashboard.url}`);
     console.log(`Active project:        ${activeProject.name} (${activeProject.id})`);
     console.log(`Project path:          ${activeProject.path}`);
@@ -233,7 +250,9 @@ async function main(): Promise<void> {
       console.log(`Run: curl -s http://${HOST}:${PORT}/understand -H 'Content-Type: application/json' -d '{"projectId":"${activeProject.id}"}'`);
       console.log("");
     }
+    console.log("  GET  /              Control UI (project picker + run analysis)");
     console.log("  GET  /health");
+    console.log("  GET  /browse?path=  Browse folders for new projects");
     console.log("  GET  /projects");
     console.log('  POST /projects      { "name": "...", "path": "/path/to/repo", "activate": true }');
     console.log("  POST /projects/:id/activate");

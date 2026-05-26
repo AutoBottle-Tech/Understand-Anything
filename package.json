@@ -11,6 +11,7 @@
     "dev:dashboard": "pnpm --filter @understand-anything/dashboard dev",
     "dev:agent": "pnpm --filter @understand-anything/agent dev",
     "start:agent": "pnpm --filter @understand-anything/agent start",
+    "stop:agent": "./understand-agent/stop.sh",
     "lint": "eslint ."
   },
   "devDependencies": {
