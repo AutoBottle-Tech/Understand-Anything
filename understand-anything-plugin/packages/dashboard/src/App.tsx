@@ -131,8 +131,21 @@ function Dashboard({ accessToken }: { accessToken: string }) {
 
   useEffect(() => {
     fetch(dataUrl("knowledge-graph.json", accessToken))
-      .then((res) => res.json())
-      .then((data: unknown) => {
+      .then(async (res) => {
+        const data: unknown = await res.json();
+        const errorMessage =
+          typeof data === "object" &&
+          data !== null &&
+          "error" in data &&
+          typeof (data as { error?: unknown }).error === "string"
+            ? (data as { error: string }).error
+            : null;
+
+        if (!res.ok || (errorMessage && !("project" in (data as object)))) {
+          setLoadError(errorMessage ?? "No knowledge graph found. Run /understand first.");
+          return;
+        }
+
         const result = validateGraph(data);
         if (result.success && result.data) {
           setGraph(result.data);

@@ -160,6 +160,11 @@ export async function startDashboard(graphDir: string = REPO_ROOT): Promise<Dash
   return dashboardInfo;
 }
 
+export async function restartDashboard(graphDir: string): Promise<DashboardInfo> {
+  stopDashboard();
+  return startDashboard(graphDir);
+}
+
 export function stopDashboard(): void {
   if (dashboardProcess && !dashboardProcess.killed) {
     dashboardProcess.kill("SIGTERM");

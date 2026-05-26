@@ -37,9 +37,55 @@ understand-agent API:  http://127.0.0.1:8787
 Understand Anything UI: http://127.0.0.1:5173/?token=...
 ```
 
-Open the **UI URL** in your browser to explore the knowledge graph. The token is included automatically — you do not need to paste it into the gate. Run `POST /understand` via the API first if `.understand-anything/knowledge-graph.json` does not exist yet.
+Open the **UI URL** in your browser to explore the knowledge graph. The token is included automatically — you do not need to paste it into the gate.
+
+**Important:** the dashboard needs a completed analysis first. If you see `No knowledge graph found. Run /understand first.`, run `POST /understand` on the active project (see Projects below), then refresh the dashboard.
 
 Set a stable token in `claude-local/.env` with `UNDERSTAND_ACCESS_TOKEN` (default: `understand-local-dev-token`). Disable auto-open with `UNDERSTAND_DASHBOARD_OPEN=false`.
+
+## Projects
+
+Projects are stored in `understand-agent/data/projects.json` (gitignored). Each project points at a codebase root; Understand Anything writes artifacts to `<project-path>/.understand-anything/`.
+
+On first start, a default project is registered for this repo (`understand-anything`).
+
+### List projects
+
+```bash
+curl -s http://127.0.0.1:8787/projects
+```
+
+### Register a new project
+
+```bash
+curl -s http://127.0.0.1:8787/projects \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "My Other App",
+    "path": "/path/to/other/repo",
+    "activate": true
+  }'
+```
+
+Setting `"activate": true` switches the dashboard to that project and restarts the UI server.
+
+### Activate an existing project
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/projects/my-other-app/activate
+```
+
+### Analyze a project
+
+Use `projectId` (preferred) or `projectPath` on agent calls:
+
+```bash
+curl -s http://127.0.0.1:8787/understand \
+  -H 'Content-Type: application/json' \
+  -d '{ "projectId": "understand-anything", "full": false }'
+```
+
+After analysis completes, refresh the dashboard to load the new graph.
 
 ## Port and host
 
@@ -47,7 +93,7 @@ Set a stable token in `claude-local/.env` with `UNDERSTAND_ACCESS_TOKEN` (defaul
 |---------|---------|---------|
 | Agent API | `http://127.0.0.1:8787` | `UNDERSTAND_AGENT_PORT`, `UNDERSTAND_AGENT_HOST` |
 | Dashboard UI | `http://127.0.0.1:5173/?token=...` | `UNDERSTAND_DASHBOARD_PORT`, `UNDERSTAND_DASHBOARD_HOST` |
-| Graph source | repo root | `UNDERSTAND_GRAPH_DIR` |
+| Graph source | active project path | set via Projects API; legacy fallback `UNDERSTAND_GRAPH_DIR` |
 
 Agent API port examples:
 
@@ -102,7 +148,8 @@ curl -s http://127.0.0.1:8787/understand \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `projectPath` | No | Directory to analyze (default: this repo root) |
+| `projectPath` | No | Directory to analyze (default: active project) |
+| `projectId` | No | Registered project id (preferred over `projectPath`) |
 | `full` | No | Force full rebuild (`true` / `false`) |
 | `language` | No | Output language (ISO code or name, e.g. `ja`, `zh-TW`) |
 | `sessionId` | No | Resume a previous SDK session |
@@ -123,7 +170,7 @@ curl -s http://127.0.0.1:8787/explain \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `projectPath` | No | Project root (default: repo root) |
+| `projectPath` | No | Project root (default: active project) |
 | `target` | Yes | File path or `path:symbol` |
 | `prompt` | No | Extra question for the explanation |
 | `sessionId` | No | Resume a previous session |
@@ -143,7 +190,7 @@ curl -s http://127.0.0.1:8787/chat \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `projectPath` | No | Project root (default: repo root) |
+| `projectPath` | No | Project root (default: active project) |
 | `prompt` | Yes | User message |
 | `sessionId` | No | Resume a previous session |
 

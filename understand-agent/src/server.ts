@@ -1,9 +1,19 @@
 import http from "node:http";
 import path from "node:path";
-import { REPO_ROOT } from "./paths.js";
 import { loadClaudeLocalEnv } from "./env.js";
 import { runAgent, type RunAgentRequest } from "./agent.js";
-import { getDashboardInfo, startDashboard } from "./dashboard.js";
+import { getDashboardInfo, restartDashboard, startDashboard } from "./dashboard.js";
+import {
+  createProject,
+  ensureDefaultProject,
+  getActiveProject,
+  getProject,
+  getProjectStatus,
+  listProjects,
+  resolveProjectPath,
+  setActiveProject,
+  type ProjectRecord,
+} from "./projects.js";
 
 const env = loadClaudeLocalEnv();
 Object.assign(process.env, env);
@@ -18,10 +28,13 @@ function resolvePort(raw: string | undefined): number {
 
 const PORT = resolvePort(process.env.UNDERSTAND_AGENT_PORT);
 const HOST = process.env.UNDERSTAND_AGENT_HOST ?? "127.0.0.1";
-const GRAPH_DIR = path.resolve(process.env.UNDERSTAND_GRAPH_DIR ?? REPO_ROOT);
 
 interface JsonBody {
+  projectId?: string;
   projectPath?: string;
+  path?: string;
+  name?: string;
+  activate?: boolean;
   target?: string;
   prompt?: string;
   full?: boolean;
@@ -45,15 +58,20 @@ async function readJson(req: http.IncomingMessage): Promise<JsonBody> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonBody;
 }
 
-function defaultProjectPath(body: JsonBody): string {
-  return path.resolve(body.projectPath ?? GRAPH_DIR);
+function projectPayload(project: ProjectRecord) {
+  return {
+    ...project,
+    status: getProjectStatus(project.path),
+  };
 }
 
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${HOST}`);
   const dashboard = getDashboardInfo();
+  const activeProject = getActiveProject();
 
   if (req.method === "GET" && url.pathname === "/health") {
+    const status = getProjectStatus(activeProject.path);
     sendJson(res, 200, {
       ok: true,
       service: "understand-agent",
@@ -61,9 +79,49 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       port: PORT,
       apiUrl: `http://${HOST}:${PORT}`,
       dashboardUrl: dashboard?.url ?? null,
-      dashboardGraphDir: dashboard?.graphDir ?? GRAPH_DIR,
+      dashboardGraphDir: dashboard?.graphDir ?? activeProject.path,
+      activeProject: projectPayload(activeProject),
       claudeConfigDir: process.env.CLAUDE_CONFIG_DIR,
-      defaultProject: GRAPH_DIR,
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/projects") {
+    sendJson(res, 200, {
+      ok: true,
+      activeProjectId: ensureDefaultProject().activeProjectId,
+      projects: listProjects().map(projectPayload),
+    });
+    return;
+  }
+
+  const projectActivateMatch = url.pathname.match(/^\/projects\/([^/]+)\/activate$/);
+  if (req.method === "POST" && projectActivateMatch) {
+    const project = setActiveProject(decodeURIComponent(projectActivateMatch[1]!));
+    const dashboardInfo = await restartDashboard(project.path);
+    sendJson(res, 200, {
+      ok: true,
+      project: projectPayload(project),
+      dashboardUrl: dashboardInfo.url,
+      message: statusMessage(project),
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/projects") {
+    const body = await readJson(req);
+    if (!body.path) {
+      sendJson(res, 400, { ok: false, error: "POST /projects requires path" });
+      return;
+    }
+    const project = createProject(body.name ?? path.basename(body.path), body.path, body.activate ?? true);
+    const dashboardInfo =
+      body.activate === false ? getDashboardInfo() : await restartDashboard(project.path);
+    sendJson(res, 201, {
+      ok: true,
+      project: projectPayload(project),
+      dashboardUrl: dashboardInfo?.url ?? null,
+      message: statusMessage(project),
     });
     return;
   }
@@ -75,13 +133,16 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
   try {
     const body = await readJson(req);
-    const projectPath = defaultProjectPath(body);
+    const project = resolveProjectPath({
+      projectId: body.projectId,
+      projectPath: body.projectPath,
+    });
     let agentReq: RunAgentRequest;
 
     switch (url.pathname) {
       case "/understand":
         agentReq = {
-          projectPath,
+          projectPath: project.path,
           mode: "understand",
           full: body.full,
           language: body.language,
@@ -90,7 +151,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         break;
       case "/explain":
         agentReq = {
-          projectPath,
+          projectPath: project.path,
           mode: "explain",
           target: body.target,
           prompt: body.prompt,
@@ -99,7 +160,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         break;
       case "/chat":
         agentReq = {
-          projectPath,
+          projectPath: project.path,
           mode: "chat",
           prompt: body.prompt,
           sessionId: body.sessionId,
@@ -111,9 +172,19 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
 
     const result = await runAgent(agentReq);
+    const refreshed = getProject(project.id);
+    let dashboardUrl = getDashboardInfo()?.url ?? null;
+    if (result.ok && result.knowledgeGraphPath) {
+      const active = getActiveProject();
+      if (active.id !== project.id) {
+        setActiveProject(project.id);
+        dashboardUrl = (await restartDashboard(project.path)).url;
+      }
+    }
     sendJson(res, result.ok ? 200 : 500, {
       ...result,
-      dashboardUrl: getDashboardInfo()?.url ?? null,
+      project: projectPayload(refreshed),
+      dashboardUrl,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -121,9 +192,20 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   }
 }
 
+function statusMessage(project: ProjectRecord): string {
+  const status = getProjectStatus(project.path);
+  if (status.hasKnowledgeGraph) {
+    return `Dashboard now viewing ${project.name}. Knowledge graph is ready.`;
+  }
+  return `Dashboard now viewing ${project.name}. No knowledge graph yet — run POST /understand with projectId "${project.id}".`;
+}
+
 async function main(): Promise<void> {
+  const activeProject = getActiveProject();
+  const status = getProjectStatus(activeProject.path);
+
   console.log("Starting Understand Anything dashboard...");
-  const dashboard = await startDashboard(GRAPH_DIR);
+  const dashboard = await startDashboard(activeProject.path);
 
   const server = http.createServer((req, res) => {
     void handleRequest(req, res);
@@ -143,12 +225,21 @@ async function main(): Promise<void> {
     console.log("");
     console.log(`understand-agent API:  http://${HOST}:${PORT}`);
     console.log(`Understand Anything UI: ${dashboard.url}`);
-    console.log(`Graph directory:       ${dashboard.graphDir}`);
+    console.log(`Active project:        ${activeProject.name} (${activeProject.id})`);
+    console.log(`Project path:          ${activeProject.path}`);
     console.log("");
+    if (!status.hasKnowledgeGraph) {
+      console.log("No knowledge graph yet for the active project.");
+      console.log(`Run: curl -s http://${HOST}:${PORT}/understand -H 'Content-Type: application/json' -d '{"projectId":"${activeProject.id}"}'`);
+      console.log("");
+    }
     console.log("  GET  /health");
-    console.log('  POST /understand  { "projectPath": "...", "full": false, "language": "en" }');
-    console.log('  POST /explain     { "projectPath": "...", "target": "src/foo.ts" }');
-    console.log('  POST /chat        { "projectPath": "...", "prompt": "..." }');
+    console.log("  GET  /projects");
+    console.log('  POST /projects      { "name": "...", "path": "/path/to/repo", "activate": true }');
+    console.log("  POST /projects/:id/activate");
+    console.log('  POST /understand    { "projectId": "...", "full": false, "language": "en" }');
+    console.log('  POST /explain       { "projectId": "...", "target": "src/foo.ts" }');
+    console.log('  POST /chat          { "projectId": "...", "prompt": "..." }');
     console.log("");
   });
 }
