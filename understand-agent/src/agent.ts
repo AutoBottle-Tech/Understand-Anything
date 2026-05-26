@@ -6,6 +6,12 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { PLUGIN_ROOT } from "./paths.js";
 import { withClaudeLocalEnv } from "./env.js";
+import {
+  logAgentEnd,
+  logAgentError,
+  logAgentMessage,
+  logAgentStart,
+} from "./logs.js";
 
 export type AgentMode = "understand" | "explain" | "chat";
 
@@ -115,32 +121,48 @@ export async function runAgent(req: RunAgentRequest): Promise<RunAgentResult> {
 
   return withClaudeLocalEnv(async () => {
     const messages: SDKMessage[] = [];
+    logAgentStart({ mode: req.mode, projectPath, prompt });
 
-    for await (const message of query({
-      prompt,
-      options: {
-        cwd: projectPath,
-        model: process.env.ANTHROPIC_MODEL,
-        permissionMode: "bypassPermissions",
-        settingSources: ["user"],
-        plugins: [{ type: "local", path: PLUGIN_ROOT }],
-        skills: "all",
-        allowedTools: ["Read", "Edit", "Write", "Bash", "Grep", "Glob", "Skill", "Agent"],
-        resume: req.sessionId,
-        maxTurns: 200,
-      },
-    })) {
-      messages.push(message);
+    try {
+      for await (const message of query({
+        prompt,
+        options: {
+          cwd: projectPath,
+          model: process.env.ANTHROPIC_MODEL,
+          permissionMode: "bypassPermissions",
+          settingSources: ["user"],
+          plugins: [{ type: "local", path: PLUGIN_ROOT }],
+          skills: "all",
+          allowedTools: ["Read", "Edit", "Write", "Bash", "Grep", "Glob", "Skill", "Agent"],
+          resume: req.sessionId,
+          maxTurns: 200,
+        },
+      })) {
+        logAgentMessage(message);
+        messages.push(message);
+      }
+
+      const { text, sessionId, ok } = collectText(messages);
+      const graphPath = path.join(projectPath, ".understand-anything", "knowledge-graph.json");
+      const knowledgeGraphPath = fs.existsSync(graphPath) ? graphPath : undefined;
+
+      logAgentEnd({
+        ok,
+        mode: req.mode,
+        projectPath,
+        sessionId,
+        knowledgeGraphPath,
+      });
+
+      return {
+        ok,
+        text,
+        sessionId,
+        knowledgeGraphPath,
+      };
+    } catch (error) {
+      logAgentError(error, { mode: req.mode, projectPath });
+      throw error;
     }
-
-    const { text, sessionId, ok } = collectText(messages);
-    const graphPath = path.join(projectPath, ".understand-anything", "knowledge-graph.json");
-
-    return {
-      ok,
-      text,
-      sessionId,
-      knowledgeGraphPath: fs.existsSync(graphPath) ? graphPath : undefined,
-    };
   });
 }

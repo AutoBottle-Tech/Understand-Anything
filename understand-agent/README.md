@@ -58,7 +58,7 @@ Control UI:            http://127.0.0.1:8787/
 Understand Anything UI: http://127.0.0.1:5173/?token=...
 ```
 
-Open the **Control UI** at `http://127.0.0.1:8787/` to pick projects, browse folders, save new projects, and run `/understand` without curl.
+Open the **Control UI** at `http://127.0.0.1:8787/` to pick projects, browse folders, save new projects, and run `/understand` without curl. Use the **Logs** tab to watch live Claude SDK agent output (stored in `understand-agent/data/agent.log`, capped at 30 MB).
 
 Open the **Dashboard UI** in your browser to explore the knowledge graph after analysis completes.
 

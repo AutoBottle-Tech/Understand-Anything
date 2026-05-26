@@ -5,6 +5,13 @@ import { loadClaudeLocalEnv } from "./env.js";
 import { runAgent, type RunAgentRequest } from "./agent.js";
 import { getDashboardInfo, restartDashboard, startDashboard } from "./dashboard.js";
 import {
+  formatLogEntry,
+  getLogStats,
+  logServerEvent,
+  readLogEntries,
+  subscribeLogs,
+} from "./logs.js";
+import {
   createProject,
   ensureDefaultProject,
   getActiveProject,
@@ -100,6 +107,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   const projectActivateMatch = url.pathname.match(/^\/projects\/([^/]+)\/activate$/);
   if (req.method === "POST" && projectActivateMatch) {
     const project = setActiveProject(decodeURIComponent(projectActivateMatch[1]!));
+    logServerEvent("Project activated", { projectId: project.id, path: project.path });
     const dashboardInfo = await restartDashboard(project.path);
     sendJson(res, 200, {
       ok: true,
@@ -120,6 +128,36 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/logs") {
+    const limit = Number(url.searchParams.get("limit") ?? "5000");
+    const entries = readLogEntries(Number.isFinite(limit) ? limit : 5000);
+    sendJson(res, 200, {
+      ok: true,
+      ...getLogStats(),
+      entries,
+      text: entries.map(formatLogEntry).join("\n"),
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/logs/stream") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write(`data: ${JSON.stringify({ type: "connected", ...getLogStats() })}\n\n`);
+
+    const unsubscribe = subscribeLogs((entry) => {
+      res.write(`data: ${JSON.stringify({ type: "entry", entry, line: formatLogEntry(entry) })}\n\n`);
+    });
+
+    req.on("close", () => {
+      unsubscribe();
+    });
+    return;
+  }
+
   if (req.method === "GET" && serveStatic(url.pathname, res)) {
     return;
   }
@@ -136,6 +174,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return;
     }
     const project = createProject(body.name ?? path.basename(body.path), body.path, body.activate ?? true);
+    logServerEvent("Project saved", { projectId: project.id, path: project.path, activate: body.activate ?? true });
     const dashboardInfo =
       body.activate === false ? getDashboardInfo() : await restartDashboard(project.path);
     sendJson(res, 201, {
@@ -220,6 +259,11 @@ async function main(): Promise<void> {
   const activeProject = getActiveProject();
   const status = getProjectStatus(activeProject.path);
 
+  logServerEvent("understand-agent started", {
+    activeProjectId: activeProject.id,
+    projectPath: activeProject.path,
+  });
+
   console.log("Starting Understand Anything dashboard...");
   const dashboard = await startDashboard(activeProject.path);
 
@@ -253,6 +297,8 @@ async function main(): Promise<void> {
     console.log("  GET  /              Control UI (project picker + run analysis)");
     console.log("  GET  /health");
     console.log("  GET  /browse?path=  Browse folders for new projects");
+    console.log("  GET  /logs            Agent log history (JSON)");
+    console.log("  GET  /logs/stream     Live agent log stream (SSE)");
     console.log("  GET  /projects");
     console.log('  POST /projects      { "name": "...", "path": "/path/to/repo", "activate": true }');
     console.log("  POST /projects/:id/activate");

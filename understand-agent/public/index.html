@@ -33,7 +33,27 @@
       margin: 0 0 0.25rem;
       color: var(--accent);
     }
-    .subtitle { color: var(--muted); margin: 0 0 2rem; font-size: 0.95rem; }
+    .subtitle { color: var(--muted); margin: 0 0 1.25rem; font-size: 0.95rem; }
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--muted);
+      padding: 0.45rem 0.9rem;
+    }
+    .tab-btn.active {
+      color: var(--accent);
+      border-color: var(--accent-dim);
+      background: #1a1510;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -126,6 +146,40 @@
     }
     .log.error { color: var(--danger); }
     .log.success { color: var(--success); }
+    .logs-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      display: inline-block;
+      margin-right: 0.35rem;
+    }
+    .live-dot.on { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .agent-log-view {
+      margin: 0;
+      padding: 0.85rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 420px;
+      max-height: calc(100vh - 220px);
+      overflow: auto;
+      color: #c8c4bf;
+    }
     .modal-backdrop {
       display: none;
       position: fixed;
@@ -194,6 +248,12 @@
     <h1>Understand Agent</h1>
     <p class="subtitle">Select a project, browse for a new codebase folder, and run analysis.</p>
 
+    <div class="tabs">
+      <button type="button" class="tab-btn active" data-tab="projects">Projects</button>
+      <button type="button" class="tab-btn" data-tab="logs">Logs</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-projects">
     <div class="card active-project" id="active-card">
       <h2>Active project</h2>
       <div id="active-name">Loading…</div>
@@ -225,6 +285,20 @@
         <button type="button" id="btn-save" class="primary">Save &amp; activate</button>
       </div>
     </div>
+    </div>
+
+    <div class="tab-panel" id="tab-logs">
+      <div class="card">
+        <h2>Agent logs</h2>
+        <div class="logs-toolbar">
+          <span><span class="live-dot" id="live-dot"></span><span id="live-label">Idle</span></span>
+          <span id="log-size">0 B</span>
+          <label class="checkbox"><input type="checkbox" id="log-autoscroll" checked /> Auto-scroll</label>
+          <button type="button" id="btn-refresh-logs">Refresh</button>
+        </div>
+        <pre class="agent-log-view" id="agent-log-view">Loading logs…</pre>
+      </div>
+    </div>
   </div>
 
   <div class="modal-backdrop" id="browse-modal" aria-hidden="true">
@@ -245,6 +319,90 @@
   <script>
     const $ = (id) => document.getElementById(id);
     let state = { activeProjectId: null, projects: [], browsePath: null, selectedProjectId: null, busy: false };
+    let logStream = null;
+    let logLines = [];
+
+    function formatBytes(n) {
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      return (n / (1024 * 1024)).toFixed(2) + " MB";
+    }
+
+    function setActiveTab(name) {
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === name);
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === "tab-" + name);
+      });
+      if (name === "logs") {
+        loadLogs().catch((e) => appendLogLine("[error] " + e.message));
+        connectLogStream();
+      }
+    }
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+    });
+
+    function appendLogLine(line) {
+      logLines.push(line);
+      const view = $("agent-log-view");
+      view.textContent = logLines.join("\n");
+      if ($("log-autoscroll").checked) {
+        view.scrollTop = view.scrollHeight;
+      }
+    }
+
+    function renderLogStats(stats) {
+      $("log-size").textContent = formatBytes(stats.size || 0) + " / 30 MB max";
+      const live = stats.running;
+      $("live-dot").classList.toggle("on", live);
+      $("live-label").textContent = live ? "Agent running" : "Idle";
+    }
+
+    async function loadLogs() {
+      const data = await api("/logs?limit=5000");
+      logLines = data.text ? data.text.split("\n").filter(Boolean) : [];
+      $("agent-log-view").textContent = logLines.length ? logLines.join("\n") : "No logs yet.";
+      renderLogStats(data);
+      if ($("log-autoscroll").checked) {
+        $("agent-log-view").scrollTop = $("agent-log-view").scrollHeight;
+      }
+    }
+
+    function connectLogStream() {
+      if (logStream) return;
+      logStream = new EventSource("/logs/stream");
+      logStream.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "connected") {
+            renderLogStats(payload);
+            return;
+          }
+          if (payload.type === "entry" && payload.line) {
+            appendLogLine(payload.line);
+            if (payload.entry?.kind === "session.start" || payload.entry?.kind === "session.end" || payload.entry?.kind === "error") {
+              api("/logs?limit=1").then((d) => renderLogStats(d)).catch(() => {});
+            }
+          }
+        } catch {
+          // ignore malformed SSE payloads
+        }
+      };
+      logStream.onerror = () => {
+        logStream.close();
+        logStream = null;
+        setTimeout(() => {
+          if (document.getElementById("tab-logs").classList.contains("active")) connectLogStream();
+        }, 2000);
+      };
+    }
+
+    $("btn-refresh-logs").addEventListener("click", () => {
+      loadLogs().catch((e) => appendLogLine("[error] " + e.message));
+    });
 
     function log(msg, kind) {
       const el = $("status-log");
@@ -440,7 +598,8 @@
       const id = selectedId();
       if (!id) return;
       setBusy(true);
-      log("Running /understand… This may take several minutes.");
+      log("Running /understand… Switch to the Logs tab to watch progress.");
+      setActiveTab("logs");
       try {
         const res = await api("/understand", {
           method: "POST",
@@ -466,6 +625,7 @@
     });
 
     refresh().catch((e) => log(e.message, "error"));
+    connectLogStream();
   </script>
 </body>
 </html>
